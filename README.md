@@ -17,6 +17,7 @@ AWS / Azure / GCP의 **공개 가격 API**를 연동해, 워크로드 스펙(vCP
 | 외부 연동 | Azure Retail Prices API, AWS Price List Query API, GCP Cloud Billing Catalog API(Phase 2) |
 | 문서 생성 | OpenPDF (견적서 PDF) |
 | 문서화 | Swagger / OpenAPI (springdoc) |
+| 배포 | Docker Compose (nginx + Spring Boot + MySQL), AWS EC2 |
 
 ## 아키텍처
 
@@ -89,6 +90,45 @@ curl -X POST http://localhost:8080/api/v1/prices/sync
   `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` 환경변수 또는 `~/.aws/credentials` 프로파일을 사용합니다.
   (조회 API 호출 자체는 무료입니다.)
 - **GCP (Phase 2)**: `app.vendors.gcp.enabled=true` + `GCP_API_KEY` 환경변수 설정 시 활성화됩니다.
+
+## 배포 (Phase 4)
+
+`docker compose up -d` 하나로 **MySQL + 백엔드 + 프론트(nginx)** 전체 스택이 뜹니다.
+nginx가 정적 번들을 서빙하고 `/api`·`/swagger-ui`·`/v3/api-docs`를 백엔드로 프록시하므로,
+프론트는 동일 출처 상대경로(`/api/v1`)를 쓰고 별도 CORS 설정이 필요 없습니다.
+
+```bash
+export AWS_ACCESS_KEY_ID=...        # AWS 동기화를 쓸 때만
+export AWS_SECRET_ACCESS_KEY=...
+docker compose up -d --build
+```
+
+| 서비스 | 포트 | 비고 |
+|---|---|---|
+| frontend (nginx) | 80 | SPA + 리버스 프록시 |
+| backend | 8080 | 직접 접근용. 프론트만 공개하려면 이 포트 매핑을 빼도 됩니다 |
+| mysql | 3306 | 볼륨 `mysql-data`에 영속화 |
+
+접속: `http://<호스트>/` · Swagger UI `http://<호스트>/swagger-ui.html`
+
+### EC2 배포 절차
+
+```bash
+# 1) 보안 그룹에서 80(및 필요 시 22) 인바운드 허용
+# 2) 인스턴스에서
+sudo yum install -y docker git && sudo systemctl enable --now docker
+sudo usermod -aG docker ec2-user && newgrp docker
+git clone https://github.com/dlwldP/sales.git && cd sales
+docker compose up -d --build
+```
+
+AWS 자격증명은 액세스 키 대신 **EC2 인스턴스 역할(IAM Role)** 로 주는 편이 안전합니다.
+`pricing:GetProducts`·`DescribeServices`·`GetAttributeValues` 권한을 붙인 역할을 인스턴스에 연결하면
+`DefaultCredentialsProvider`가 자동으로 집어가므로 compose의 `AWS_*` 환경변수를 비워둬도 됩니다.
+
+> ⚠️ **공개 전 확인** — 현재 인증이 없어서 `POST /api/v1/prices/sync`를 누구나 호출할 수 있습니다.
+> 외부에 공개한다면 nginx에서 이 경로를 차단(`location = /api/v1/prices/sync { deny all; }`)하거나
+> 관리자 인증을 붙이세요. Swagger UI도 마찬가지로 내부에서만 열려면 `/swagger-ui` 프록시를 빼면 됩니다.
 
 ## API 명세
 
@@ -232,11 +272,15 @@ backend/
     service/     QuoteService, QuotePdfService, PriceService, PriceSyncService,
                  PriceCacheWriter, CostCalculator
       vendor/    AwsPriceClient, AzurePriceClient, GcpPriceClient, AzureSkuSpecResolver
+  Dockerfile     maven 빌드 → JRE 런타임 (멀티스테이지)
 frontend/
   src/
     api/         Axios 클라이언트, 에러 메시지 정규화
     components/  QuoteForm, ComparisonTable, ComparisonChart, QuoteHistory
     types/       API 타입 정의
+  Dockerfile     vite 빌드 → nginx 정적 서빙 (멀티스테이지)
+  nginx.conf     SPA fallback + /api·/swagger-ui 리버스 프록시
+docker-compose.yml   mysql + backend + frontend 전체 스택
 ```
 
 ## 로드맵
@@ -246,7 +290,7 @@ frontend/
 | Phase 1 (MVP) | AWS+Azure 견적 비교, 스케줄러 캐싱, React 비교 테이블/차트 | 완료 |
 | Phase 2 | GCP 연동, 견적 이력 페이지네이션 | 구현 완료(GCP는 API Key 설정 시 활성화) |
 | Phase 3 | 견적서 PDF 내보내기, 조건별(리전/벤더/OS/기간) 필터 | 완료 |
-| Phase 4 | AWS EC2 배포, Swagger 문서 공개 | 예정 |
+| Phase 4 | AWS EC2 배포(docker compose 전체 스택), Swagger 문서 공개 | 완료 |
 
 ## 참고 자료
 

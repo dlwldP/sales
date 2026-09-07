@@ -37,5 +37,15 @@ services:
     ports:
       - "8080:8080"
 
+  frontend:
+    build:
+      context: ./frontend
+    container_name: quote-frontend
+    depends_on:
+      - backend
+    # nginx가 정적 번들을 서빙하고 /api·/swagger-ui는 backend로 프록시한다.
+    ports:
+      - "80:80"
+
 volumes:
   mysql-data:
