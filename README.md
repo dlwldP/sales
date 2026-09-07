@@ -1,300 +1,110 @@
 # 멀티클라우드 견적 자동화 시스템
 
 AWS / Azure / GCP의 **공개 가격 API**를 연동해, 워크로드 스펙(vCPU·RAM·스토리지·리전·OS)을 입력하면
-벤더별 월 비용 견적을 자동 산출·비교해 주는 서비스입니다.
-
-- 영업/기획 담당자가 각 클라우드 콘솔 가격표를 수동으로 뒤지지 않고 즉시 비교 견적을 얻습니다.
-- 하드코딩된 가격표가 아니라 벤더 공개 API 기반이라 가격 변동에 강합니다.
-- 견적 이력을 저장해 고객사별 제안 자료로 재활용할 수 있습니다.
-
-## 기술 스택
+벤더별 월 비용 견적을 자동 산출·비교해 주는 서비스입니다. 견적 이력은 저장해 재활용하고,
+고객 제안용 PDF 견적서로 내보낼 수 있습니다.
 
 | 구분 | 기술 |
 |---|---|
-| Backend | Java 17, Spring Boot 3.3, Spring Data JPA, Spring Scheduler, Spring Validation |
+| Backend | Java 17, Spring Boot 3.3, Spring Data JPA, Scheduler, Validation |
 | DB | H2(로컬 기본) / MySQL(Docker·RDS) |
 | Frontend | React 18, TypeScript, Vite, Axios, Recharts |
-| 외부 연동 | Azure Retail Prices API, AWS Price List Query API, GCP Cloud Billing Catalog API(Phase 2) |
-| 문서 생성 | OpenPDF (견적서 PDF) |
-| 문서화 | Swagger / OpenAPI (springdoc) |
-| 배포 | Docker Compose (nginx + Spring Boot + MySQL), AWS EC2 |
+| 외부 연동 | Azure Retail Prices, AWS Price List Query, GCP Cloud Billing Catalog |
+| 그 외 | OpenPDF(견적서), springdoc(Swagger), Docker Compose + nginx |
 
 ## 아키텍처
 
 ```
-[React Client]
-     │ (REST, JSON)
-     ▼
-[Spring Boot API Server]
-     ├─ QuoteController      → 견적 생성/조회/이력
-     ├─ PriceController      → 캐시된 가격 조회, 수동 동기화
-     ├─ MetaController       → 폼 구성용 리전/벤더/OS 목록
-     ├─ PriceSyncScheduler   → 매일 1회 외부 API 폴링 → PriceSnapshot 저장
-     ▼
-[H2 / MySQL] ── Vendor / PriceSnapshot / QuoteRequest / QuoteItem
-
-PriceSyncScheduler ──(HTTP)──────────▶ Azure Retail Prices API      (인증 없음)
-                   ──(AWS SDK/SigV4)─▶ AWS Price List Query API     (IAM 자격증명)
-                   ──(HTTP + API Key)▶ GCP Cloud Billing Catalog API (Phase 2)
+[React] ──REST──▶ [Spring Boot] ──▶ [H2 / MySQL]
+                        ▲              Vendor / PriceSnapshot
+                        │              QuoteRequest / QuoteItem
+              PriceSyncScheduler (매일 1회)
+                        │
+                        ├─(HTTP)──────────▶ Azure Retail Prices API      (인증 없음)
+                        ├─(AWS SDK/SigV4)─▶ AWS Price List Query API     (IAM 자격증명)
+                        └─(HTTP + API Key)▶ GCP Cloud Billing Catalog API (기본 비활성)
 ```
 
 **설계 포인트** — 외부 API를 요청 경로에서 직접 호출하지 않고, 스케줄러가 주기적으로 수집해
-DB(`PriceSnapshot`)에 캐싱한 뒤 내부 API가 캐시를 서빙합니다.
-
-- Azure/GCP는 페이지당 최대 1,000건 응답이라 매 요청마다 풀스캔하면 느립니다.
-- AWS는 IAM 서명 호출 자체에 레이턴시가 있습니다.
-- 프론트 응답속도를 확보하고, 외부 API 장애 시에도 마지막 캐시로 서비스가 지속됩니다.
-
-한 벤더의 동기화가 실패해도 나머지 벤더 캐시는 그대로 유지되도록 벤더/리전/OS 조합 단위로
-트랜잭션과 예외 처리를 분리했습니다.
+`PriceSnapshot`에 캐싱한 뒤 내부 API가 캐시를 서빙합니다. 응답 속도를 확보하고 외부 API 장애 시에도
+마지막 캐시로 서비스가 지속됩니다. 동기화는 벤더/리전/OS 조합 단위로 분리돼 한 벤더가 실패해도
+나머지 캐시는 유지됩니다.
 
 ## 빠른 시작
 
-### 1. 백엔드 (샘플 데이터 포함, 자격증명 불필요)
-
 ```bash
-cd backend
-./mvnw spring-boot:run -Dspring-boot.run.profiles=local,sample
-# 또는: mvn spring-boot:run -Dspring-boot.run.profiles=local,sample
-```
+# 백엔드 — 클라우드 계정 없이 샘플 가격으로 바로 확인
+cd backend && ./mvnw spring-boot:run -Dspring-boot.run.profiles=local,sample
 
-- `local` 프로파일: 인메모리 H2 사용 (`http://localhost:8080/h2-console`)
-- `sample` 프로파일: `sample-prices.sql`의 **샘플 가격**을 적재해 클라우드 계정 없이 UI/로직 확인
-  > 샘플 단가는 데모용 근사치이며 실제 청구 단가가 아닙니다. 운영에서는 스케줄러가 채운 데이터를 사용합니다.
-- Swagger UI: `http://localhost:8080/swagger-ui.html`
+# 프론트엔드
+cd frontend && npm install && npm run dev      # http://localhost:5173
 
-### 2. 프론트엔드
-
-```bash
-cd frontend
-npm install
-npm run dev     # http://localhost:5173 (→ /api 요청은 8080으로 프록시)
-```
-
-### 3. MySQL로 실행 (Docker)
-
-```bash
-docker compose up -d mysql
-cd backend && mvn spring-boot:run -Dspring-boot.run.profiles=mysql
-```
-
-### 4. 실제 가격 동기화
-
-```bash
-# 스케줄러(기본 매일 03:00 KST)를 기다리지 않고 즉시 동기화
+# 실제 가격 동기화 (스케줄러는 기본 매일 03:00 KST)
 curl -X POST http://localhost:8080/api/v1/prices/sync
 ```
 
-- **Azure**: 인증 불필요. 바로 동작합니다.
-- **AWS**: `pricing:GetProducts` 권한이 있는 IAM 자격증명이 필요합니다.
-  `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` 환경변수 또는 `~/.aws/credentials` 프로파일을 사용합니다.
-  (조회 API 호출 자체는 무료입니다.)
-- **GCP (Phase 2)**: `app.vendors.gcp.enabled=true` + `GCP_API_KEY` 환경변수 설정 시 활성화됩니다.
+Swagger UI: `http://localhost:8080/swagger-ui.html`
 
-## 배포 (Phase 4)
+- **Azure** 인증 불필요 · **AWS** `pricing:GetProducts` 권한의 IAM 자격증명 필요(조회는 무료)
+- **GCP** `app.vendors.gcp.enabled=true` + `GCP_API_KEY` 설정 시 활성화
 
-`docker compose up -d` 하나로 **MySQL + 백엔드 + 프론트(nginx)** 전체 스택이 뜹니다.
-nginx가 정적 번들을 서빙하고 `/api`·`/swagger-ui`·`/v3/api-docs`를 백엔드로 프록시하므로,
-프론트는 동일 출처 상대경로(`/api/v1`)를 쓰고 별도 CORS 설정이 필요 없습니다.
+## API
 
-```bash
-export AWS_ACCESS_KEY_ID=...        # AWS 동기화를 쓸 때만
-export AWS_SECRET_ACCESS_KEY=...
-docker compose up -d --build
-```
-
-| 서비스 | 포트 | 비고 |
-|---|---|---|
-| frontend (nginx) | 80 | SPA + 리버스 프록시 |
-| backend | 8080 | 직접 접근용. 프론트만 공개하려면 이 포트 매핑을 빼도 됩니다 |
-| mysql | 3306 | 볼륨 `mysql-data`에 영속화 |
-
-접속: `http://<호스트>/` · Swagger UI `http://<호스트>/swagger-ui.html`
-
-### EC2 배포 절차
-
-```bash
-# 1) 보안 그룹에서 80(및 필요 시 22) 인바운드 허용
-# 2) 인스턴스에서
-sudo yum install -y docker git && sudo systemctl enable --now docker
-sudo usermod -aG docker ec2-user && newgrp docker
-git clone https://github.com/dlwldP/sales.git && cd sales
-docker compose up -d --build
-```
-
-AWS 자격증명은 액세스 키 대신 **EC2 인스턴스 역할(IAM Role)** 로 주는 편이 안전합니다.
-`pricing:GetProducts`·`DescribeServices`·`GetAttributeValues` 권한을 붙인 역할을 인스턴스에 연결하면
-`DefaultCredentialsProvider`가 자동으로 집어가므로 compose의 `AWS_*` 환경변수를 비워둬도 됩니다.
-
-> ⚠️ **공개 전 확인** — 현재 인증이 없어서 `POST /api/v1/prices/sync`를 누구나 호출할 수 있습니다.
-> 외부에 공개한다면 nginx에서 이 경로를 차단(`location = /api/v1/prices/sync { deny all; }`)하거나
-> 관리자 인증을 붙이세요. Swagger UI도 마찬가지로 내부에서만 열려면 `/swagger-ui` 프록시를 빼면 됩니다.
-
-## API 명세
-
-Base URL: `/api/v1`
+Base URL `/api/v1` — 상세 스펙은 Swagger UI 참고
 
 | Method | Path | 설명 |
 |---|---|---|
 | POST | `/quotes` | 견적 생성 (201) |
-| GET | `/quotes/{quoteId}` | 견적 단건 조회 |
-| GET | `/quotes?page=0&size=20` | 견적 이력 목록 (생성일 내림차순, 조건 필터 지원) |
-| GET | `/quotes/{quoteId}/pdf` | 견적서 PDF 내려받기 |
-| GET | `/prices?vendor=AWS&region=korea&vcpu=4&memoryGb=16` | 캐시된 가격 조회 (관리/디버그용) |
+| GET | `/quotes/{id}` | 견적 단건 조회 |
+| GET | `/quotes` | 이력 목록. `page` `size` + `region` `vendor` `os` `from` `to` 필터 |
+| GET | `/quotes/{id}/pdf` | 견적서 PDF 내려받기 |
+| GET | `/prices` | 캐시된 가격 조회 (관리/디버그용) |
 | POST | `/prices/sync` | 가격 수동 동기화 |
 | GET | `/meta` | 지원 리전/벤더/OS 목록 |
 
-### 견적 이력 조건 필터
-
-`GET /quotes`는 아래 파라미터를 조합해 필터링합니다. 모두 선택이며, 생략하면 조건을 적용하지 않습니다.
-
-| 파라미터 | 예시 | 설명 |
-|---|---|---|
-| `region` | `korea` | 논리 리전 키. 미지원 값이면 400 |
-| `vendor` | `AWS` | **해당 벤더가 포함된** 견적만 |
-| `os` | `LINUX` | OS |
-| `from` / `to` | `2026-09-01` | 생성일 범위. **양쪽 모두 해당 일자 포함**, `from > to`면 400 |
-
-```bash
-curl "localhost:8080/api/v1/quotes?region=korea&vendor=AWS&from=2026-09-01&to=2026-09-30&page=0&size=20"
-```
-
-### 견적서 PDF
-
-```bash
-curl -OJ localhost:8080/api/v1/quotes/1/pdf    # quote-1-20260907.pdf
-```
-
-워크로드 스펙 표, 벤더별 비교표(최저가 강조), 절감액 요약(최저가 대비 월/연 절감액), 산출 기준 고지를
-A4 1장으로 담습니다.
-
-> **폰트 참고** — 한글은 OpenPDF의 CJK 폰트 메트릭(`HYSMyeongJo-Medium`)을 **임베드하지 않고** 참조합니다.
-> 덕분에 PDF가 3KB 수준으로 가볍고 저장소에 폰트 파일을 두지 않아도 되지만, 한국어 폰트가 없는 환경의
-> 뷰어에서는 글자가 깨질 수 있습니다. 배포처가 제한적이라면 `NotoSansKR` 등을 임베드하도록 바꾸는 것이 안전합니다.
-
-### 견적 생성 예시
-
-```bash
-curl -X POST http://localhost:8080/api/v1/quotes \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "workloadName": "테스트 서버",
-    "vcpu": 4, "memoryGb": 16, "storageGb": 100,
-    "region": "korea", "os": "LINUX",
-    "vendors": ["AWS", "AZURE"]
-  }'
-```
-
-```json
-{
-  "quoteId": 1,
-  "workloadName": "테스트 서버",
-  "vcpu": 4, "memoryGb": 16, "storageGb": 100,
-  "region": "korea", "os": "LINUX",
-  "createdAt": "2026-09-07T14:00:00+09:00",
-  "results": [
-    { "vendor": "AWS",   "matchedSku": "t3.xlarge",       "computeCostUsd": 151.84, "storageCostUsd": 9.12, "monthlyCostUsd": 160.96 },
-    { "vendor": "AZURE", "matchedSku": "Standard_D4s_v5", "computeCostUsd": 163.52, "storageCostUsd": 8.80, "monthlyCostUsd": 172.32 }
-  ]
-}
-```
-
-### 에러 응답 (공통 포맷)
-
-```json
-{
-  "timestamp": "2026-09-07T14:00:00+09:00",
-  "status": 400,
-  "error": "BAD_REQUEST",
-  "message": "vcpu는 1 이상이어야 합니다.",
-  "path": "/api/v1/quotes"
-}
-```
-
-| 상태코드 | 상황 |
-|---|---|
-| 400 | 입력값 검증 실패, 미지원 리전 |
-| 404 | 견적 ID 없음 |
-| 502 | 외부 가격 API 응답 실패 |
+에러는 공통 포맷(`timestamp` `status` `error` `message` `path`)으로 반환합니다.
+400 입력 검증·미지원 리전 / 404 견적 없음 / 502 외부 가격 API 실패.
 
 ## 견적 산출 규칙
 
-1. 요청 리전(논리 키 `korea` 등)을 벤더 리전 코드(`ap-northeast-2`, `koreacentral`)로 변환합니다.
-2. 캐시에서 **요청 스펙 이상**(vCPU ≥ 요청, 메모리 ≥ 요청)인 SKU 중 **월 비용이 가장 낮은 것**을 매칭합니다.
-3. 월 비용 = 시간 단가 × **730시간**(24h × 365d ÷ 12개월).
-4. 스토리지 비용 = `app.storage.rate-usd-per-gb-month` 단가 × 요청 GB를 가산합니다.
-   - 스토리지 SKU 구조가 벤더마다 크게 달라 MVP에서는 벤더별 표준 SSD 단가를 설정값으로 둡니다.
-5. 매칭되는 SKU가 없으면 금액 대신 사유(`note`)를 담아 반환합니다(견적 자체는 실패하지 않음).
+캐시에서 **요청 스펙 이상**(vCPU·메모리 ≥ 요청)인 SKU 중 **월 비용이 가장 낮은 것**을 매칭하고,
+`시간 단가 × 730시간`에 스토리지 단가(`app.storage.*` 설정값 × 요청 GB)를 더합니다.
+매칭되는 SKU가 없으면 견적을 실패시키지 않고 사유(`note`)를 담아 반환합니다.
 
-### 벤더별 스펙 해석 노트
+## 배포
 
-- **AWS**: `GetProducts` 응답의 `product.attributes`에 vCPU·메모리가 있어 그대로 사용합니다.
-  `terms.OnDemand → priceDimensions → pricePerUnit.USD` 중 단위가 `Hrs`인 값을 단가로 씁니다.
-- **Azure**: Retail Prices 응답에 vCPU·메모리가 **없어** `armSkuName`(`Standard_D4s_v5`)을 파싱해
-  시리즈별 vCPU당 메모리 비율(D=4GB, E=8GB, F=2GB, L=8GB, B=2/4GB)로 스펙을 유추합니다.
-  비율이 일정하지 않은 GPU(N)·HPC(H)·초대형 메모리(M) 시리즈는 매칭 대상에서 제외합니다.
-- **GCP (Phase 2)**: 머신 타입 단가가 아니라 Core/Ram SKU가 분리되어 있어,
-  패밀리별 코어·메모리 단가를 수집해 표준 형태(`n2-standard-4` 등) 단가를 합성합니다.
+```bash
+docker compose up -d --build     # mysql + backend + frontend(nginx) 전체 스택
+```
 
-## 주요 설정 (`backend/src/main/resources/application.yml`)
+nginx가 정적 번들을 서빙하고 `/api`·`/swagger-ui`를 백엔드로 프록시하므로 배포 환경에서는
+CORS 설정이 필요 없습니다. 접속 `http://<호스트>/` · Swagger `http://<호스트>/swagger-ui.html`.
+AWS 자격증명은 액세스 키보다 **EC2 인스턴스 역할(IAM Role)** 을 권장합니다.
 
-| 키 | 기본값 | 설명 |
-|---|---|---|
-| `app.price-sync.cron` | `0 0 3 * * *` | 동기화 스케줄 |
-| `app.price-sync.zone` | `Asia/Seoul` | 스케줄 타임존 |
-| `app.price-sync.regions` | `[korea]` | 동기화 대상 논리 리전 |
-| `app.price-sync.run-on-startup` | `false` | 기동 시 1회 동기화 |
-| `app.price-sync.max-pages` | `20` | 벤더 API 페이지네이션 상한 |
-| `app.vendors.{aws,azure,gcp}.enabled` | `true/true/false` | 벤더 연동 on/off |
-| `app.storage.rate-usd-per-gb-month` | AWS 0.0912 / AZURE 0.088 / GCP 0.085 | 스토리지 단가 |
+## 알아둘 점
 
-지원 리전(논리 키): `korea`, `tokyo`, `singapore`, `us-east`, `west-europe`
+- ⚠️ **인증이 없습니다.** 외부 공개 시 `POST /prices/sync`를 nginx에서 차단하거나 관리자 인증을 붙이세요.
+- **Azure는 가격 API가 vCPU·메모리를 주지 않아** `armSkuName`을 파싱해 스펙을 유추합니다(시리즈별 비율).
+  비율이 불규칙한 N·H·M 시리즈는 매칭에서 제외합니다. 실제 스펙과 대조 검증이 필요합니다.
+- **스토리지 단가는 벤더별 표준 SSD 근사치**를 설정값으로 둡니다(SKU 구조가 벤더마다 크게 다름).
+- **PDF 한글 폰트는 임베드하지 않습니다.** 가볍지만 한국어 폰트가 없는 뷰어에서는 깨질 수 있습니다.
+- `sample` 프로파일 단가는 **데모용 근사치**입니다. 연동 테스트 시에는 함께 켜지 마세요.
+
+설정값은 `backend/src/main/resources/application.yml` 참고 (동기화 주기·대상 리전·페이지 상한·벤더 on/off).
 
 ## 테스트
 
 ```bash
-cd backend && mvn test        # 서비스/REST/파싱 단위·통합 테스트
+cd backend && ./mvnw test     # 서비스/REST/파싱 테스트
 cd frontend && npm run build  # 타입체크 + 프로덕션 빌드
-```
-
-## 프로젝트 구조
-
-```
-backend/
-  src/main/java/com/multicloud/quote/
-    config/      AppProperties, RegionCatalog, AwsPricingConfig, WebConfig, OpenApiConfig
-    controller/  QuoteController, PriceController, MetaController
-    dto/         요청/응답 DTO
-    entity/      Vendor, PriceSnapshot, QuoteRequest, QuoteItem
-    exception/   GlobalExceptionHandler, ErrorResponse, 도메인 예외
-    repository/  Spring Data JPA 리포지토리
-    scheduler/   PriceSyncScheduler
-    service/     QuoteService, QuotePdfService, PriceService, PriceSyncService,
-                 PriceCacheWriter, CostCalculator
-      vendor/    AwsPriceClient, AzurePriceClient, GcpPriceClient, AzureSkuSpecResolver
-  Dockerfile     maven 빌드 → JRE 런타임 (멀티스테이지)
-frontend/
-  src/
-    api/         Axios 클라이언트, 에러 메시지 정규화
-    components/  QuoteForm, ComparisonTable, ComparisonChart, QuoteHistory
-    types/       API 타입 정의
-  Dockerfile     vite 빌드 → nginx 정적 서빙 (멀티스테이지)
-  nginx.conf     SPA fallback + /api·/swagger-ui 리버스 프록시
-docker-compose.yml   mysql + backend + frontend 전체 스택
 ```
 
 ## 로드맵
 
-| Phase | 범위 | 상태 |
-|---|---|---|
-| Phase 1 (MVP) | AWS+Azure 견적 비교, 스케줄러 캐싱, React 비교 테이블/차트 | 완료 |
-| Phase 2 | GCP 연동, 견적 이력 페이지네이션 | 구현 완료(GCP는 API Key 설정 시 활성화) |
-| Phase 3 | 견적서 PDF 내보내기, 조건별(리전/벤더/OS/기간) 필터 | 완료 |
-| Phase 4 | AWS EC2 배포(docker compose 전체 스택), Swagger 문서 공개 | 완료 |
+Phase 1~4 완료 — MVP 비교 견적 · GCP 연동 · PDF 내보내기/조건 필터 · Docker Compose 배포
 
 ## 참고 자료
 
 - [Azure Retail Prices REST API](https://learn.microsoft.com/en-us/rest/api/cost-management/retail-prices/azure-retail-prices)
-- [AWS Price List Query API 가이드](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/using-price-list-query-api.html)
-- [AWS Pricing GetProducts API Reference](https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_pricing_GetProducts.html)
+- [AWS Price List Query API](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/using-price-list-query-api.html)
 - [GCP Cloud Billing Catalog API](https://docs.cloud.google.com/billing/v1/how-tos/catalog-api)
