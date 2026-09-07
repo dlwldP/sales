@@ -1,0 +1,41 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: quote-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: quotedb
+      MYSQL_USER: quote
+      MYSQL_PASSWORD: quote
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uquote", "-pquote"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    container_name: quote-backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: mysql
+      DB_URL: jdbc:mysql://mysql:3306/quotedb?useSSL=false&serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+      DB_USERNAME: quote
+      DB_PASSWORD: quote
+      # AWS 가격 동기화를 쓰려면 자격증명을 주입한다 (미설정 시 AWS 동기화만 실패하고 나머지는 정상 동작)
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      GCP_API_KEY: ${GCP_API_KEY:-}
+    ports:
+      - "8080:8080"
+
+volumes:
+  mysql-data:

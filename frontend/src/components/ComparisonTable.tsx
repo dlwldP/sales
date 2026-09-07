@@ -1,0 +1,52 @@
+import type { Quote } from '../types/quote';
+
+interface Props {
+  quote: Quote;
+}
+
+const usd = (value: number | null) =>
+  value === null || value === undefined
+    ? '-'
+    : `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+export default function ComparisonTable({ quote }: Props) {
+  const priced = quote.results.filter((r) => r.monthlyCostUsd !== null);
+  const cheapest = priced.length > 0 ? priced[0].vendor : null;
+
+  return (
+    <div className="card">
+      <h2>벤더별 비교</h2>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>벤더</th>
+              <th>매칭 SKU</th>
+              <th className="num">컴퓨트 ($/월)</th>
+              <th className="num">스토리지 ($/월)</th>
+              <th className="num">합계 ($/월)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {quote.results.map((item) => (
+              <tr key={item.vendor} className={item.vendor === cheapest ? 'best' : undefined}>
+                <td>
+                  {item.vendor}
+                  {item.vendor === cheapest && <span className="badge">최저가</span>}
+                </td>
+                <td>{item.matchedSku ?? <span className="muted">{item.note ?? '매칭 없음'}</span>}</td>
+                <td className="num">{usd(item.computeCostUsd)}</td>
+                <td className="num">{usd(item.storageCostUsd)}</td>
+                <td className="num strong">{usd(item.monthlyCostUsd)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="hint">
+        {quote.vcpu} vCPU / {quote.memoryGb}GB RAM / {quote.storageGb}GB 스토리지 · {quote.region} ·{' '}
+        {quote.os} · 월 730시간 기준
+      </p>
+    </div>
+  );
+}

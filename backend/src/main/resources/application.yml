@@ -1,0 +1,106 @@
+spring:
+  application:
+    name: multicloud-quote-automation
+
+  profiles:
+    active: local
+
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+
+server:
+  port: 8080
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+app:
+  price-sync:
+    # 매일 새벽 3시(KST) 1회 동기화
+    cron: "0 0 3 * * *"
+    zone: Asia/Seoul
+    regions:
+      - korea
+    os-types:
+      - LINUX
+    run-on-startup: false
+    max-pages: 20
+
+  vendors:
+    aws:
+      enabled: true
+      # Price List Query API 엔드포인트는 us-east-1 고정
+      region-code: us-east-1
+    azure:
+      enabled: true
+      base-url: https://prices.azure.com/api/retail/prices
+      currency-code: USD
+    gcp:
+      # Phase 2. API Key 발급 후 활성화
+      enabled: false
+      base-url: https://cloudbilling.googleapis.com/v1
+      api-key: ${GCP_API_KEY:}
+
+  # 블록 스토리지 단가(USD/GB·월). 벤더 표준 SSD 기준 근사치이며 설정으로 조정한다.
+  storage:
+    rate-usd-per-gb-month:
+      AWS: 0.0912
+      AZURE: 0.0880
+      GCP: 0.0850
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    url: jdbc:h2:mem:quotedb;MODE=MySQL;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
+---
+# 자격증명/네트워크 없이 UI를 확인하기 위한 샘플 가격 데이터 프로파일.
+# 실행: --spring.profiles.active=local,sample
+spring:
+  config:
+    activate:
+      on-profile: sample
+  sql:
+    init:
+      mode: always
+      data-locations: classpath:sample-prices.sql
+  jpa:
+    # ddl-auto로 테이블이 생성된 뒤 data-locations가 실행되도록 지연시킨다.
+    defer-datasource-initialization: true
+
+---
+spring:
+  config:
+    activate:
+      on-profile: mysql
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/quotedb?useSSL=false&serverTimezone=Asia/Seoul&characterEncoding=UTF-8}
+    username: ${DB_USERNAME:quote}
+    password: ${DB_PASSWORD:quote}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false

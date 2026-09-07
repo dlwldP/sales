@@ -1,0 +1,28 @@
+# Java / Maven
+backend/target/
+*.class
+*.jar
+!**/gradle/wrapper/*.jar
+
+# Node
+frontend/node_modules/
+frontend/dist/
+npm-debug.log*
+yarn-error.log*
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 로컬 시크릿 / 환경설정
+.env
+.env.local
+backend/src/main/resources/application-local-secrets.yml
