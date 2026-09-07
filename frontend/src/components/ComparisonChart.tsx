@@ -9,6 +9,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { hasPrice } from '../types/quote';
 import type { Quote } from '../types/quote';
 
 interface Props {
@@ -23,7 +24,7 @@ const VENDOR_COLORS: Record<string, string> = {
 
 export default function ComparisonChart({ quote }: Props) {
   const data = quote.results
-    .filter((item) => item.monthlyCostUsd !== null)
+    .filter(hasPrice)
     .map((item) => ({
       vendor: item.vendor,
       compute: item.computeCostUsd ?? 0,

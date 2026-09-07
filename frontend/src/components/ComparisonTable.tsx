@@ -1,21 +1,29 @@
+import { quotePdfUrl } from '../api/client';
+import { hasPrice } from '../types/quote';
 import type { Quote } from '../types/quote';
 
 interface Props {
   quote: Quote;
 }
 
-const usd = (value: number | null) =>
-  value === null || value === undefined
-    ? '-'
-    : `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const usd = (value?: number | null) =>
+  typeof value === 'number'
+    ? `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : '-';
 
 export default function ComparisonTable({ quote }: Props) {
-  const priced = quote.results.filter((r) => r.monthlyCostUsd !== null);
+  // results는 서버에서 월 비용 오름차순으로 내려온다.
+  const priced = quote.results.filter(hasPrice);
   const cheapest = priced.length > 0 ? priced[0].vendor : null;
 
   return (
     <div className="card">
-      <h2>벤더별 비교</h2>
+      <div className="card-head">
+        <h2>벤더별 비교</h2>
+        <a className="button-link" href={quotePdfUrl(quote.quoteId)} download>
+          견적서 PDF 내려받기
+        </a>
+      </div>
       <div className="table-wrap">
         <table>
           <thead>

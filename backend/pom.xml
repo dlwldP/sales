@@ -21,6 +21,8 @@
         <java.version>17</java.version>
         <aws-sdk.version>2.28.11</aws-sdk.version>
         <springdoc.version>2.6.0</springdoc.version>
+        <openpdf.version>2.0.3</openpdf.version>
+        <pdfbox.version>3.0.3</pdfbox.version>
     </properties>
 
     <dependencies>
@@ -56,6 +58,18 @@
             <version>${aws-sdk.version}</version>
         </dependency>
 
+        <!-- 견적서 PDF 생성. fonts-extra는 한글(CJK) 폰트 메트릭을 제공해 폰트 파일 동봉 없이 한글을 출력한다. -->
+        <dependency>
+            <groupId>com.github.librepdf</groupId>
+            <artifactId>openpdf</artifactId>
+            <version>${openpdf.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.github.librepdf</groupId>
+            <artifactId>openpdf-fonts-extra</artifactId>
+            <version>${openpdf.version}</version>
+        </dependency>
+
         <!-- Swagger / OpenAPI -->
         <dependency>
             <groupId>org.springdoc</groupId>
@@ -72,6 +86,13 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- 생성한 PDF에서 텍스트를 추출해 내용(한글 포함)을 검증하기 위한 테스트 전용 의존성 -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>${pdfbox.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

@@ -3,6 +3,7 @@ package com.multicloud.quote.service;
 import com.multicloud.quote.config.AppProperties;
 import com.multicloud.quote.config.RegionCatalog;
 import com.multicloud.quote.dto.request.QuoteCreateRequest;
+import com.multicloud.quote.dto.request.QuoteHistoryFilter;
 import com.multicloud.quote.dto.response.QuoteResponse;
 import com.multicloud.quote.dto.response.QuoteSummaryResponse;
 import com.multicloud.quote.dto.response.PageResponse;
@@ -105,10 +106,17 @@ public class QuoteService {
         return QuoteResponse.from(quote);
     }
 
-    public PageResponse<QuoteSummaryResponse> findAll(int page, int size) {
+    public PageResponse<QuoteSummaryResponse> findAll(QuoteHistoryFilter filter, int page, int size) {
+        if (filter.region() != null && !regionCatalog.isSupported(filter.region())) {
+            throw new IllegalArgumentException(
+                    "지원하지 않는 region 입니다: " + filter.region() + " (지원: " + regionCatalog.logicalRegions() + ")");
+        }
+
         Pageable pageable = PageRequest.of(page, size);
         return PageResponse.of(
-                quoteRequestRepository.findAllByOrderByCreatedAtDesc(pageable),
+                quoteRequestRepository.search(
+                        filter.region(), filter.vendor(), filter.os(),
+                        filter.fromDateTime(), filter.toDateTimeExclusive(), pageable),
                 QuoteSummaryResponse::from);
     }
 }

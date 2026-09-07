@@ -4,7 +4,15 @@ import ComparisonTable from './components/ComparisonTable';
 import QuoteForm from './components/QuoteForm';
 import QuoteHistory from './components/QuoteHistory';
 import { createQuote, fetchMeta, fetchQuote, fetchQuotes, toErrorMessage } from './api/client';
-import type { Meta, PageResponse, Quote, QuoteCreateRequest, QuoteSummary } from './types/quote';
+import type {
+  Meta,
+  PageResponse,
+  Quote,
+  QuoteCreateRequest,
+  QuoteHistoryFilter,
+  QuoteSummary,
+} from './types/quote';
+import { EMPTY_FILTER } from './types/quote';
 
 const PAGE_SIZE = 10;
 
@@ -13,24 +21,31 @@ export default function App() {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [history, setHistory] = useState<PageResponse<QuoteSummary> | null>(null);
   const [historyPage, setHistoryPage] = useState(0);
+  const [filter, setFilter] = useState<QuoteHistoryFilter>(EMPTY_FILTER);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadHistory = useCallback(async (page: number) => {
+  const loadHistory = useCallback(async (page: number, historyFilter: QuoteHistoryFilter) => {
     try {
-      setHistory(await fetchQuotes(page, PAGE_SIZE));
+      setHistory(await fetchQuotes(page, PAGE_SIZE, historyFilter));
     } catch (e) {
       setError(toErrorMessage(e));
     }
   }, []);
+
+  const handleFilterChange = (next: QuoteHistoryFilter) => {
+    setFilter(next);
+    // 필터가 바뀌면 결과 집합이 달라지므로 첫 페이지부터 다시 본다.
+    setHistoryPage(0);
+  };
 
   useEffect(() => {
     fetchMeta().then(setMeta).catch((e) => setError(toErrorMessage(e)));
   }, []);
 
   useEffect(() => {
-    void loadHistory(historyPage);
-  }, [historyPage, loadHistory]);
+    void loadHistory(historyPage, filter);
+  }, [historyPage, filter, loadHistory]);
 
   const handleSubmit = async (request: QuoteCreateRequest) => {
     setSubmitting(true);
@@ -40,7 +55,7 @@ export default function App() {
       setQuote(created);
       // 새 견적이 목록 맨 앞에 오도록 첫 페이지를 다시 읽는다.
       setHistoryPage(0);
-      await loadHistory(0);
+      await loadHistory(0, filter);
     } catch (e) {
       setError(toErrorMessage(e));
     } finally {
@@ -75,7 +90,10 @@ export default function App() {
           <QuoteForm meta={meta} submitting={submitting} onSubmit={handleSubmit} />
           <QuoteHistory
             page={history}
+            meta={meta}
+            filter={filter}
             selectedId={quote?.quoteId ?? null}
+            onFilterChange={handleFilterChange}
             onSelect={handleSelect}
             onPageChange={setHistoryPage}
           />

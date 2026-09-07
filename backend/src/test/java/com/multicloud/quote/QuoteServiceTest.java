@@ -1,6 +1,7 @@
 package com.multicloud.quote;
 
 import com.multicloud.quote.dto.request.QuoteCreateRequest;
+import com.multicloud.quote.dto.request.QuoteHistoryFilter;
 import com.multicloud.quote.dto.response.QuoteResponse;
 import com.multicloud.quote.entity.OsType;
 import com.multicloud.quote.entity.PriceSnapshot;
@@ -19,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -130,10 +132,72 @@ class QuoteServiceTest {
         quoteService.create(request(4, 16, 10, List.of(VendorType.AWS)));
         quoteService.create(request(4, 16, 20, List.of(VendorType.AWS)));
 
-        var page = quoteService.findAll(0, 10);
+        var page = quoteService.findAll(QuoteHistoryFilter.empty(), 0, 10);
         assertThat(page.content()).isNotEmpty();
         assertThat(page.totalElements()).isGreaterThanOrEqualTo(2);
         assertThat(page.page()).isZero();
+    }
+
+    @Test
+    @DisplayName("리전 필터는 해당 리전 견적만 남긴다")
+    void filtersHistoryByRegion() {
+        quoteService.create(request(4, 16, 10, List.of(VendorType.AWS)));
+
+        var korea = quoteService.findAll(
+                new QuoteHistoryFilter("korea", null, null, null, null), 0, 10);
+        var tokyo = quoteService.findAll(
+                new QuoteHistoryFilter("tokyo", null, null, null, null), 0, 10);
+
+        assertThat(korea.content()).isNotEmpty();
+        assertThat(korea.content()).allSatisfy(q -> assertThat(q.region()).isEqualTo("korea"));
+        assertThat(tokyo.content()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("벤더 필터는 그 벤더가 포함된 견적만 남기고 중복 행을 만들지 않는다")
+    void filtersHistoryByVendor() {
+        quoteService.create(request(4, 16, 10, List.of(VendorType.AWS, VendorType.AZURE)));
+        quoteService.create(request(4, 16, 10, List.of(VendorType.AZURE)));
+
+        var aws = quoteService.findAll(
+                new QuoteHistoryFilter(null, VendorType.AWS, null, null, null), 0, 10);
+        var gcp = quoteService.findAll(
+                new QuoteHistoryFilter(null, VendorType.GCP, null, null, null), 0, 10);
+
+        // AWS를 포함한 견적은 1건이며, 항목이 2개라도 행이 중복되지 않아야 한다
+        assertThat(aws.totalElements()).isEqualTo(1);
+        assertThat(aws.content()).hasSize(1);
+        assertThat(gcp.content()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("기간 필터는 종료일 당일을 포함한다")
+    void filtersHistoryByDateRange() {
+        quoteService.create(request(4, 16, 10, List.of(VendorType.AWS)));
+        LocalDate today = LocalDate.now();
+
+        var included = quoteService.findAll(
+                new QuoteHistoryFilter(null, null, null, today, today), 0, 10);
+        var past = quoteService.findAll(
+                new QuoteHistoryFilter(null, null, null, today.minusDays(10), today.minusDays(5)), 0, 10);
+
+        assertThat(included.content()).isNotEmpty();
+        assertThat(past.content()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("from이 to보다 이후면 예외를 던지고, 미지원 리전 필터도 거부한다")
+    void rejectsInvalidFilters() {
+        LocalDate today = LocalDate.now();
+
+        assertThatThrownBy(() -> new QuoteHistoryFilter(null, null, null, today, today.minusDays(1)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("from");
+
+        assertThatThrownBy(() -> quoteService.findAll(
+                new QuoteHistoryFilter("mars", null, null, null, null), 0, 10))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("region");
     }
 
     private QuoteCreateRequest request(int vcpu, int memoryGb, int storageGb, List<VendorType> vendors) {

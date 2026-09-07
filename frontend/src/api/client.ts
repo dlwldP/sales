@@ -5,6 +5,7 @@ import type {
   PageResponse,
   Quote,
   QuoteCreateRequest,
+  QuoteHistoryFilter,
   QuoteSummary,
 } from '../types/quote';
 
@@ -39,9 +40,28 @@ export async function fetchQuote(quoteId: number): Promise<Quote> {
   return data;
 }
 
-export async function fetchQuotes(page = 0, size = 20): Promise<PageResponse<QuoteSummary>> {
-  const { data } = await api.get<PageResponse<QuoteSummary>>('/quotes', { params: { page, size } });
+export async function fetchQuotes(
+  page = 0,
+  size = 20,
+  filter?: QuoteHistoryFilter,
+): Promise<PageResponse<QuoteSummary>> {
+  const { data } = await api.get<PageResponse<QuoteSummary>>('/quotes', {
+    params: {
+      page,
+      size,
+      // 빈 값은 파라미터 자체를 보내지 않아 서버에서 "조건 없음"으로 처리되게 한다.
+      region: filter?.region || undefined,
+      vendor: filter?.vendor || undefined,
+      from: filter?.from || undefined,
+      to: filter?.to || undefined,
+    },
+  });
   return data;
+}
+
+/** 견적서 PDF 다운로드 URL. 브라우저가 직접 받도록 링크로 사용한다. */
+export function quotePdfUrl(quoteId: number): string {
+  return `${api.defaults.baseURL}/quotes/${quoteId}/pdf`;
 }
 
 export async function fetchMeta(): Promise<Meta> {

@@ -15,6 +15,7 @@ AWS / Azure / GCP의 **공개 가격 API**를 연동해, 워크로드 스펙(vCP
 | DB | H2(로컬 기본) / MySQL(Docker·RDS) |
 | Frontend | React 18, TypeScript, Vite, Axios, Recharts |
 | 외부 연동 | Azure Retail Prices API, AWS Price List Query API, GCP Cloud Billing Catalog API(Phase 2) |
+| 문서 생성 | OpenPDF (견적서 PDF) |
 | 문서화 | Swagger / OpenAPI (springdoc) |
 
 ## 아키텍처
@@ -97,10 +98,39 @@ Base URL: `/api/v1`
 |---|---|---|
 | POST | `/quotes` | 견적 생성 (201) |
 | GET | `/quotes/{quoteId}` | 견적 단건 조회 |
-| GET | `/quotes?page=0&size=20` | 견적 이력 목록 (생성일 내림차순) |
+| GET | `/quotes?page=0&size=20` | 견적 이력 목록 (생성일 내림차순, 조건 필터 지원) |
+| GET | `/quotes/{quoteId}/pdf` | 견적서 PDF 내려받기 |
 | GET | `/prices?vendor=AWS&region=korea&vcpu=4&memoryGb=16` | 캐시된 가격 조회 (관리/디버그용) |
 | POST | `/prices/sync` | 가격 수동 동기화 |
 | GET | `/meta` | 지원 리전/벤더/OS 목록 |
+
+### 견적 이력 조건 필터
+
+`GET /quotes`는 아래 파라미터를 조합해 필터링합니다. 모두 선택이며, 생략하면 조건을 적용하지 않습니다.
+
+| 파라미터 | 예시 | 설명 |
+|---|---|---|
+| `region` | `korea` | 논리 리전 키. 미지원 값이면 400 |
+| `vendor` | `AWS` | **해당 벤더가 포함된** 견적만 |
+| `os` | `LINUX` | OS |
+| `from` / `to` | `2026-09-01` | 생성일 범위. **양쪽 모두 해당 일자 포함**, `from > to`면 400 |
+
+```bash
+curl "localhost:8080/api/v1/quotes?region=korea&vendor=AWS&from=2026-09-01&to=2026-09-30&page=0&size=20"
+```
+
+### 견적서 PDF
+
+```bash
+curl -OJ localhost:8080/api/v1/quotes/1/pdf    # quote-1-20260907.pdf
+```
+
+워크로드 스펙 표, 벤더별 비교표(최저가 강조), 절감액 요약(최저가 대비 월/연 절감액), 산출 기준 고지를
+A4 1장으로 담습니다.
+
+> **폰트 참고** — 한글은 OpenPDF의 CJK 폰트 메트릭(`HYSMyeongJo-Medium`)을 **임베드하지 않고** 참조합니다.
+> 덕분에 PDF가 3KB 수준으로 가볍고 저장소에 폰트 파일을 두지 않아도 되지만, 한국어 폰트가 없는 환경의
+> 뷰어에서는 글자가 깨질 수 있습니다. 배포처가 제한적이라면 `NotoSansKR` 등을 임베드하도록 바꾸는 것이 안전합니다.
 
 ### 견적 생성 예시
 
@@ -199,7 +229,8 @@ backend/
     exception/   GlobalExceptionHandler, ErrorResponse, 도메인 예외
     repository/  Spring Data JPA 리포지토리
     scheduler/   PriceSyncScheduler
-    service/     QuoteService, PriceService, PriceSyncService, PriceCacheWriter, CostCalculator
+    service/     QuoteService, QuotePdfService, PriceService, PriceSyncService,
+                 PriceCacheWriter, CostCalculator
       vendor/    AwsPriceClient, AzurePriceClient, GcpPriceClient, AzureSkuSpecResolver
 frontend/
   src/
@@ -214,7 +245,7 @@ frontend/
 |---|---|---|
 | Phase 1 (MVP) | AWS+Azure 견적 비교, 스케줄러 캐싱, React 비교 테이블/차트 | 완료 |
 | Phase 2 | GCP 연동, 견적 이력 페이지네이션 | 구현 완료(GCP는 API Key 설정 시 활성화) |
-| Phase 3 | 견적서 PDF 내보내기, 조건별(리전/기간) 필터 고도화 | 예정 |
+| Phase 3 | 견적서 PDF 내보내기, 조건별(리전/벤더/OS/기간) 필터 | 완료 |
 | Phase 4 | AWS EC2 배포, Swagger 문서 공개 | 예정 |
 
 ## 참고 자료
