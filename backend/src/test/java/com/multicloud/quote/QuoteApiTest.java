@@ -50,6 +50,10 @@ class QuoteApiTest {
         // 이 테스트 클래스는 @Transactional이 아니라 데이터가 메서드 간에 남으므로 매번 초기화한다.
         quoteRequestRepository.deleteAll();
         snapshotRepository.deleteAll();
+        // Hibernate는 호출 순서가 아니라 액션 타입 순서(INSERT가 DELETE보다 먼저)로 flush한다.
+        // flush 없이 바로 save()하면, 같은 Spring 컨텍스트/DB를 공유하는 QuoteServiceTest가
+        // 아직 지우지 못한 행과 동일 유니크 키로 insert를 시도해 제약 위반이 날 수 있다.
+        snapshotRepository.flush();
         Vendor aws = vendorService.getOrCreate(VendorType.AWS);
         Vendor azure = vendorService.getOrCreate(VendorType.AZURE);
         save(aws, "t3.xlarge", 4, 16, "ap-northeast-2", new BigDecimal("0.208"));
